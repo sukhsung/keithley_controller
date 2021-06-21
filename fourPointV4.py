@@ -3,6 +3,7 @@
 # with Keithley 2450 over USB.
 #
 # Emily Rennich 2020-05-28
+# Modfied by Suk Hyun Sung 2021-06-21
 #
 
 import pyvisa as visa
@@ -13,12 +14,13 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.ticker
 import matplotlib.animation as animation
-import datetime as dt
 import matplotlib.dates as mdates
+from datetime import datetime
 
 rm = visa.ResourceManager('@py')
 
 start_time = time.time()
+now = datetime.now()
 
 NS = 30
 NL = 20
@@ -64,6 +66,9 @@ plt.subplots_adjust(hspace=.5)
 xs = []
 ys = []
 
+mus = []
+sts = []
+
 
 def animate(i, xs, ys):
 
@@ -79,6 +84,9 @@ def animate(i, xs, ys):
     # Add x and y to lists
     xs.append(time.time() - start_time)
     ys.append(mu)
+
+    mus.append(mu)
+    sts.append(sigma)
 
     # Limit x and y lists to 20 items
     xs1 = xs[-20:]
@@ -109,34 +117,17 @@ def animate(i, xs, ys):
 ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=1,)
 plt.show()
 
-
-#### LOOP TO PRINT DATA TO GRAPHS AND COMMAND WINDOW
-##for i in range(0, 20):
-##    keithley.write("OUTP ON")
-##    keithley.write("INIT")
-##    keithley.write("*WAI")
-##
-##    # gather data from keithley
-##    data = keithley.query("TRAC:DATA? 1, 1, \"defbuffer1\", READ".format(NS))
-##    data = np.array(data.split(","), dtype="float64")
-##
-##  
-##    # add something to axes
-##    ani = animation.FuncAnimation(fig, animate, fargs=(xs, ys), interval=10)
-##    plt.show()
-##
-##    # only show most recent 20 data points in second figure
-##    #if i>5:
-##        # del fig2.lines[0]
-##
-##    # calulate mean and std deviation
-##    mu, sigma = (np.mean(data), np.std(data))
-##
-##    # print to file
-##    with open('datafile.txt', "a") as f:
-##        f.write("{0:.4e},{1:.4e}".format(mu, sigma))
-##        # python will automatically close f on with context exit
-
 # End 4-point 
 keithley.write("OUTP OFF")
 keithley.close()
+
+csvdata = np.vstack((xs, mus, sts)).T
+fname = "data/"+now.strftime("%H%M")+"_4point.csv"
+
+if not os.path.exists('data'):
+    os.makedirs('data')
+
+
+f=open(fname.format(time = round(start_time)),'a')
+f.write("Time (s),Resistance Mean (Ohm),Resistance Std (Ohm)\n")
+np.savetxt(f, csvdata, delimiter = ",")
