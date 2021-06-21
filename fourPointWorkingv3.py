@@ -5,7 +5,7 @@
 # Emily Rennich 2020-05-28
 #
 
-import pyvisa as visa
+import visa
 import time
 from time import sleep
 import numpy as np
@@ -16,7 +16,7 @@ import matplotlib.animation as animation
 import datetime as dt
 import matplotlib.dates as mdates
 
-rm = visa.ResourceManager()
+rm = visa.ResourceManager('@py')
 
 start_time = time.time()
 
