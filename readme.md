@@ -1,3 +1,10 @@
-Dependencies: install from pip: numpy, matplotlib, pyvisa, pyvisa-py, pyusb
+# Keithley Python Scripts for Electrical Measurements
 
-              for mac: port install libusb
+## Dependencies
+Common Dependencies: pyvisa, numpy, matplotlib + VISA backend (NI-Visa, Keysight IO Library Suite or pyvisa-py)
+
+```pip install pyvisa, numpy, matplotlib```
+
+For MacOS Big Sur: pyvisa-py (requires pyusb and libusb) is only option for now (Jun/23/2021)
+```pip install pyvisa-py pyusb
+port install libusb```
