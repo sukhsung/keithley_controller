@@ -39,7 +39,7 @@ ivax.xaxis.set_label_position('top')
 #rax.set_xlabel("V (V)", fontsize=16)
 fig.show()
 
-rm = visa.ResourceManager()
+rm = visa.ResourceManager('@py')
 #rm.list_resources()
 ADDR_2450 =8 #18 #7
 #ADDR_2410 = 25
@@ -57,7 +57,8 @@ N_READS = 4
 current = np.empty(N_READS)
 
 #k_back = rm.open_resource('GPIB0::{}::INSTR'.format(ADDR_2420))
-k_jv = rm.open_resource('GPIB0::{}::INSTR'.format(ADDR_2450))
+#k_jv = rm.open_resource('GPIB0::{}::INSTR'.format(ADDR_2450))
+k_jv = rm.open_resource('USB0::0x05E6::0x2450::04451534::INSTR')
 #k_jv.timeout = 10000   #10s for timeout
 
 def WriteCommand(instrument, command):
@@ -86,7 +87,7 @@ WriteCommand(k_jv, ":SENS:CURR:RANG:AUTO ON")
 
 print("Starting Sweep")
 
-N = 10
+N = 50
 voltages = np.linspace(min_v, max_v, N)
 
 for v in voltages:
@@ -99,7 +100,7 @@ for v in voltages:
   WriteCommand(k_jv, ":OUTP ON")
   WriteCommand(k_jv, ":INIT")
   WriteCommand(k_jv, ":*WAI")
-  WriteCommand(k_jv, ":TRAC:DATA? 1, 3, \"defbuffer1\", READ, REL")
+  WriteCommand(k_jv, ":TRAC:DATA? 1, 3, \"defbuffer1\", READ, TIME")
   WriteCommand(k_jv, ":OUTP OFF")
   timedif=time.time()-timeb
 

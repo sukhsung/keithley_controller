@@ -76,7 +76,7 @@ def animate(i, xs, ys):
     keithley.write("OUTP ON")
     keithley.write("INIT")
     keithley.write("*WAI")
-    data = keithley.query("TRAC:DATA? 1, 1, \"defbuffer1\", READ".format(NS))
+    data = keithley.query("TRAC:DATA? 1, 1, \"defbuffer1\", READ")
     data = np.array(data.split(","), dtype="float64")
     mu, sigma = (np.mean(data), np.std(data))
     print(data)
