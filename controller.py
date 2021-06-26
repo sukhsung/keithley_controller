@@ -39,40 +39,58 @@ class controller:
         print( "\n" )
 
 
-
 class keithley_2110( controller ):
     def __init__(self, serial_number, use_pyvisapy = True, verbose = False):
         address = "USB0::0x05E6::0x2110::{}::INSTR".format(serial_number)
         controller.__init__(self, address, use_pyvisapy, verbose)
-        self.serial_number = 8011648
+        self.serial_number = serial_number
+        self.measurement_types = ["VOLT", "VOLT:DC", "VOLT:AC", "CURR", "CURR:DC", "CURR:AC", "RES", "FRES", "CAP"]
 
-    def measure_resistance( self, FOUR_OR_TWO, RESISTANCE_RANGE="AUTO" ):
+    def setup_measurement( self, type, range ):
+        # Set Measurement Function
+        if type in self.measurement_types:
+            self.write("FUNC \"{}\"".format(type))
+        else :
+            print( "!!!! Illegal Measurement Type !!!!")
+            return
+        
+        # Set Measurement Range
+        if range == "AUTO" :
+            self.write("{}:RANG:AUTO ON".format(type))
+        elif self.is_in_range( type, range ):
+            self.write("{}:RANG {}").format(type, range)
+        else :
+            print( "!!!! Illegal Range !!!!")
+            return
 
-        # Set 4-point or 2-point measurement
-        if FOUR_OR_TWO == 4:
-            RES = "FRES"
-        elif FOUR_OR_TWO == 2:
-            RES = "RES"
-        self.write("FUNC \"{}\"".format(RES))
+    def is_in_range( self, type, range ):
+        result = False
+        if type == "VOLT:DC" or type == "VOLT":
+            if range >= -1000 and range <= 1000:
+                return True
+        elif type == "VOLT:AC":
+            if range >= 0 and range <= 750:
+                return True
+        elif type == "CURR:DC" or type == "CURR":
+            if range >= -10 and range <= 10:
+                return True
+        elif type == "CURR:AC":
+            if range >= 0 and range <= 10:
+                return True
+        elif type == "RES" or type == "FRES":
+            if range >= 0 and range <= 100e6:
+                return True
+        elif type == "CAP":
+            if range >= 0 and range <= 10e-3:
+                return True
+        return result
 
-        if RESISTANCE_RANGE == "AUTO":
-            self.write("{}:RANG:AUTO ON".format(RES))
-        elif (RESISTANCE_RANGE >=0 and RESISTANCE_RANGE <= 100e6):
-            self.write("{}:RANG {}".format(RES,RESISTANCE_RANGE))
-
+    def measure( self ):
         data = self.query( "READ?" )
         return data
 
-    def measure_capacitance( self, CAPACITANCE_RANGE="AUTO"):
-        self.write("FUNC \"CAP\"")
 
-        if CAPACITANCE_RANGE == "AUTO":
-            self.write("CAP:RANG:AUTO ON")
-        elif (CAPACITANCE_RANGE >=0 and CAPACITANCE_RANGE <= 10e-3):
-            self.write("CAP:RANG {}".format(CAPACITANCE_RANGE))
 
-        data = self.query( "READ?" )
-        return data
 
 class keithley_2450( controller ):
     def __init__(self, serial_number, use_pyvisapy = True, verbose = False):
