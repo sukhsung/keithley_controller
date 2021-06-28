@@ -1,7 +1,10 @@
 import pyvisa as visa
+import matplotlib.pyplot as plt
 import numpy as np
 import time
 import os.path
+
+from pyvisa.typing import VISAHandler
 
 class controller:
     
@@ -20,24 +23,23 @@ class controller:
         self.reset()
 
     def current_device(self) :
-        print(self.device.query("*IDN?"))
+        print(self.query("*IDN?"))
 
     def write( self, command ):
         if self.verbose :
             print("    {}".format(command))
         self.device.write(command)
 
-    def query( self, command ):
+    def query( self, command, delay = None ):
         if self.verbose :
             print("    {}".format(command))
-        return self.device.query(command)
+        return self.device.query(command, delay=delay)
     
 
     def reset( self ) :
         print( "Resetting..." )
         self.write("*RST; :STAT:PRES; *CLS")
         self.write(":OUTP OFF")
-        self.write(":OUTP:STAT OFF")
         self.write(":SYST:BEEP {},{}".format(500,0.2))
         print( "\n" )
         
@@ -67,78 +69,39 @@ class keithley_2110( controller ):
         address = "USB0::0x05E6::0x2110::{}::INSTR".format(serial_number)
         controller.__init__(self, address, use_pyvisapy, verbose)
         self.serial_number = serial_number
-        self.measurement_types = ["VOLT", "VOLT:DC", "VOLT:AC", "CURR", "CURR:DC", "CURR:AC", "RES", "FRES", "CAP"]
+        self.measure_types = ["VOLT", "VOLT:DC", "VOLT:AC", "CURR", "CURR:DC", "CURR:AC", "RES", "RES_2PT", "FRES", "RES_4PT", "CAP"]
 
-    def measurement_resistance( self, FOUR_OR_TWO="2PT", RESISTANCE_RANGE='AUTO', NUM_POINTS=1, INTERVAL=0.1 ):
-        # Set Measurement Function
-        if FOUR_OR_TWO == "4PT" :
-            self.setup_measurement( "FRES", range = RESISTANCE_RANGE )
-        elif FOUR_OR_TWO == "2PT":
-            self.setup_measurement( "RES", range = RESISTANCE_RANGE )
-        else :
-            print( "!!!! Illegal Resistance Measurement Type !!!!")
-            return
-
-        # Start Measuring
-        header = "Time (s),Resistance (Ohm)"
+    def do_measurement( self, MEASUREMENT_TYPE, MEASUREMENT_RANGE="AUTO", NUM_POINTS=1, INTERVAL=0.1 ):
+        ## Setup measurement and run repeated measurements
+        header = self.setup_measurement( MEASUREMENT_TYPE, range = MEASUREMENT_RANGE )
         print( "[{}]".format(header) )
-
-        data = self.measure( NUM_POINTS, INTERVAL )
-        return data, header
-
-    def measurement_voltage( self, AC_OR_DC="DC", VOLTAGE_RANGE="AUTO", NUM_POINTS=1, INTERVAL=0.1 ):
-        # Set Measurement Function
-        if AC_OR_DC == "DC":
-            self.setup_measurement( "VOLT:DC", range = VOLTAGE_RANGE )
-        elif AC_OR_DC == "AC" :
-            self.setup_measurement( "VOLT:AC", range = VOLTAGE_RANGE )
-        else :
-            print( "!!!! Illegal Resistance Measurement Type !!!!")
-            return
-
-        # Start Measuring
-        header = "Time (s),Voltage (V)"
-        print( "[{}]".format(header) )
-
-        data = self.measure( NUM_POINTS, INTERVAL )
-        return data, header
-
-    def measurement_current( self, AC_OR_DC="DC", CURRENT_RANGE="AUTO", NUM_POINTS=1, INTERVAL=0.1 ):
-        # Set Measurement Function
-        if AC_OR_DC == "DC":
-            self.setup_measurement( "VOLT:DC", range = CURRENT_RANGE )
-        elif AC_OR_DC == "AC" :
-            self.setup_measurement( "VOLT:AC", range = CURRENT_RANGE )
-        else :
-            print( "!!!! Illegal Resistance Measurement Type !!!!")
-            return
-
-        # Start Measuring
-        header = "Time (s),Current (A)"
-        print( "[{}]".format(header) )
-
-        data = self.measure( NUM_POINTS, INTERVAL )
-        return data, header
-
-    def measurment_capacitance( self, CAPACITANCE_RANGE='AUTO', NUM_POINTS=1, INTERVAL=0.1 ):
-        # Set Measurement Function
-        self.setup_measurement( "CAP", range = CAPACITANCE_RANGE )
-
-        # Start Measuring
-        header = "Time (s),Capacitance (F)"
-        print( "[{}]".format(header) )
-
         data = self.measure( NUM_POINTS, INTERVAL )
         return data, header
 
     def setup_measurement( self, type, range ):
         # Set Measurement Function
-        if type in self.measurement_types:
-            self.write("FUNC \"{}\"".format(type))
+        if type in self.measure_types:
+            if type in ["VOLT", "VOLT:DC", "VOLT:AC"]:
+                header = "Time (s),Voltage (V)"          
+
+            elif type in ["CURR", "CURR:DC", "CURR:AC"]:
+                header = "Time (s),Current (A)"        
+
+            elif type in ["RES", "RES_2PT"]:
+                header = "Time (s),Resistance (Ohm)"   
+                type = "RES"
+                
+            elif type in ["FRES", "RES_4PT"]:
+                type = "FRES"
+                header = "Time (s),Resistance (Ohm)"     
+
+            elif type == "CAP":
+                header = "Time (s),Capacitance (F)"   
         else :
             print( "!!!! Illegal Measurement Type !!!!")
-            return
+            return None
         
+        self.write("FUNC \"{}\"".format(type))  
         # Set Measurement Range
         if range == "AUTO" :
             self.write("{}:RANG:AUTO ON".format(type))
@@ -146,7 +109,9 @@ class keithley_2110( controller ):
             self.write("{}:RANG {}").format(type, range)
         else :
             print( "!!!! Illegal Range !!!!")
-            return
+            return None
+
+        return header
 
     def is_in_range( self, type, range ):
         result = False
@@ -172,33 +137,31 @@ class keithley_2110( controller ):
 
     def measure( self, NUM_POINTS, INTERVAL ):
         counter = 0
-        Ys = []
-        Ts = []
+        TYs = []
+
+        self.write("INIT")
         time_init = time.time()
         # Start Measuring
         while counter < NUM_POINTS:
             try:
                 curT = time.time()-time_init
-                curY = self.measure()
+                curY = self.measure_once( INTERVAL )
                 
-                Ts.append( curT )
-                Ys.append( curY )
+                TYs.append( [curT, curY] )
                 print( [curT, curY] )
                 counter += 1
-                time.sleep( INTERVAL )
+
+
             except KeyboardInterrupt:
                 print( "KeyboardInterrupt: Ending Early")
                 counter = NUM_POINTS
 
-        data = np.array( [Ts,Ys]).transpose()
+        data = np.array( TYs )
         return data
 
-    def measure_once( self ):
-        data = self.query( "READ?" )
-        return data
-
-
-
+    def measure_once( self, delay=None ):
+        return float(self.query( "FETC?", delay=delay)) # Sending 'FETCh?' after 'INIT' is much faster than 'READ?'
+        #return float(self.query( "READ?" ))
 
 class keithley_2450( controller ):
     def __init__(self, serial_number, use_pyvisapy = True, verbose = False):
@@ -207,110 +170,167 @@ class keithley_2450( controller ):
         self.serial_number = 8011648
 
 
-    def measure_resistance( self, FOUR_OR_TWO="2PT", NUM_POINTS=1, INTERVAL=0.1, 
-                            SOURCE_CURRENT="N/A", VOLTAGE_LIMIT="N/A", NUM_SAMPLE=3 ):
+    def measure_resistance( self, FOUR_OR_TWO="2PT", NUM_POINTS=1, INTERVAL=0.1, SOURCE_CURRENT="N/A", VOLTAGE_LIMIT="N/A", SENSE_RANGE="AUTO", NUM_SAMPLES=5, NPLC=1 ):
 
         # Switch to 4-Point Measurement
         if FOUR_OR_TWO == "4PT":
-            self.write(":SENS:VOLT:RSEN ON")
             print( "4 Point Resistance Measurement:")
+            self.write(":SENS:VOLT:RSEN ON")
         elif FOUR_OR_TWO == "2PT":
-            self.write(":SENS:VOLT:RSEN OFF")
             print( "2 Point Resistance Measurement:")
+            self.write(":SENS:VOLT:RSEN OFF")
         else:
             print( "Unsupported Mode")
-            return
+            return "N/A", "N/A"
 
         ## MEASUREMENT SETUP
-        if isinstance(SOURCE_CURRENT, (int, float)): 
+        if not self.isnumber(SOURCE_CURRENT): 
             print( "SOURCE CURRENT NOT DEFINED: ABORTING" )
-            return
+            return "N/A", "N/A"
+
+        if self.isnumber(NPLC):
+            self.write("SENS:VOLT:NPLC {}".format(NPLC))
+
+        NPLC = float(self.query("SENS:VOLT:NPLC?"))
+        sample_time = NUM_SAMPLES*NPLC/(60.0) * 1.01
+        if INTERVAL > sample_time:
+            sample_time = INTERVAL
+        print( "Sample Time: {}".format(sample_time))
+
 
         # Set to source current
+        print( "Sourcing Current: {}A\n".format(SOURCE_CURRENT))
         self.write(":SOUR:FUNC CURR")
         self.write(":SOUR:CURR {}".format(SOURCE_CURRENT))
-        print( "Sourcing Current: {}A\n".format(SOURCE_CURRENT))
-        if isinstance(VOLTAGE_LIMIT, (int, float)): 
+
+        if self.isnumber(VOLTAGE_LIMIT): 
+            print( "Voltage Limit: {}V\n".format(SOURCE_CURRENT))
             self.write("SOUR:CURR:VLIM {}".format(VOLTAGE_LIMIT))
+
         
         # Set to measure voltage
         self.write(":SENS:FUNC \"VOLT\"")
         self.write("SENS:VOLT:RANG:AUTO ON") #### Auto range
+        if SENSE_RANGE == "AUTO" :
+            print("Sense Range: AUTO")
+            self.write("SENS:VOLT:RANG:AUTO ON")
+        else :
+            print("Sense Range: VOLT".format(SENSE_RANGE))
+            self.write("SENS:VOLT:RANG {}".format(SENSE_RANGE))
+        print("\n")
 
         # trigger for taking 3 samples per measurement with read_interveral in between to defbuffer1
-        self.write(":TRIG:LOAD \"SimpleLoop\", {}, {}, \"defbuffer1\"".format(NUM_SAMPLE, INTERVAL))
-
-        Vs = []
-        Is = []
-        Ts = []
-        Rs = []
+        self.write(":TRIG:LOAD \"SimpleLoop\", {}".format(NUM_SAMPLES))
         time_init = time.time()
         # Start Measuring
-        header = "Time (s),Source Current (A),Measured Voltage (V),Resistance (Ohm)"
+        header = "Time (s),Source Current Mean (A),Source Current Std (A),Measured Voltage Mean(V),Measured Voltage Std (V),Resistance (Ohm)"
         print( "[{}]".format(header) )
         counter = 0
+        data = []
         while counter < NUM_POINTS:
             try:
-                self.write("OUTP ON")
-                self.write("INIT")
-                self.write("*WAI")
-                self.write("TRAC:DATA? 1, 1, \"defbuffer1\", SOUR, READ")
-                self.write("OUTP OFF")
-                curT = time.time()-time_init
 
-
-                bufferdata = self.read()
-                curI = float(bufferdata.split(",")[0] )
-                curV = float(bufferdata.split(",")[1] )
-                curR = curV/curI
-
-                Is.append( curI )
-                Vs.append( curV )
-                Ts.append( curT )
-                Rs.append( curR )
-                print( [curT, curI, curV, curR] )
+                (T, Im, Is, Vm, Vs) = self.measure_once( NUM_SAMPLES, sample_time )
+                dT = T-time_init
+                data.append( [dT, Im, Is, Vm, Vs, Vm/Im] )
+                print("[{:.3f}, {:+E}, {:+E}, {:+E}, {:+E}, {:+E}]".format(dT, Im, Is, Vm, Vs, Vm/Im))
                 counter += 1
             except KeyboardInterrupt:
                 print( "KeyboardInterrupt: Ending Early")
                 counter = NUM_POINTS
 
-        data = np.array( [Ts,Is,Vs,Rs]).transpose()
+
         return data, header
-
-    def measure_voltage_sweep(self, CURRENT_LIMIT, V_START, V_END, NUM_POINTS, INTERVAL):
         
+    def measure_IV_Sweep( self, SOURCE_TYPE, SOURCE_VALUES, FOUR_OR_TWO="2PT", SOURCE_LIMIT="N/A", SENSE_RANGE="AUTO", INTERVAL=0.1, NUM_SAMPLES = 5, NPLC=1) :
+        
+        if SOURCE_TYPE == 'VOLT':
+            SENSE_TYPE = 'CURR'
+            LIMIT_TYPE = 'ILIM'
+            LIMIT_UNIT = 'A'
+            header = "Time (s),Voltage Mean (V),Voltage Std (V),Current Mean (A),Current Std (A)"
+        elif SOURCE_TYPE == 'CURR':
+            SENSE_TYPE = 'VOLT'
+            LIMIT_TYPE = 'VLIM'
+            LIMIT_UNIT = 'V'
+            header = "Time (s),Current Mean (A),Current Std (A),Voltage Mean (V),Voltage Std (V)"
+        else :
+            print( "SOURCE_TYPE must be \"VOLT\" or \"CURR\"")
+            return "N/A", "N/A"
+
+
         # Set Voltage Source
-        self.write("SOUR:FUNC VOLT")
-        self.write("SOUR:VOLT:RANG {}".format(self.calculate_source_range("VOLT",[V_START,V_END])))
-        self.write("SOUR:VOLT:ILIM {}".format(CURRENT_LIMIT))
+        self.write("SOUR:FUNC {}".format(SOURCE_TYPE))
+        self.write("SOUR:{}:RANG {}".format(SOURCE_TYPE, self.calculate_source_range( SOURCE_TYPE,SOURCE_VALUES)))
 
-        # Set Current Sensing
-        self.write("SENS:FUNC \"CURR\"")
-        self.write("SENS:CURR:RANG:AUTO ON")
-
-        # Set Linear Source Sweep
-        self.write("SOUR:SWE:VOLT:LIN {}, {}, {}, {}".format(V_START, V_END, NUM_POINTS, INTERVAL))
-        self.write("INIT")
-        self.write("*WAI")
-        self.write("TRAC:DATA? 1, {}, \"defbuffer1\", SOUR, READ".format( NUM_POINTS) )
+        if self.isnumber( SOURCE_LIMIT ):
+            print( "Source Limit: {}{}\n".format(SOURCE_LIMIT, LIMIT_UNIT))
+            self.write("SOUR:{}:{} {}".format(SOURCE_TYPE, LIMIT_TYPE, SOURCE_LIMIT))
 
 
-    def measure_current_sweep(self, VOLTAGE_LIMIT, I_START, I_END, NUM_POINTS, INTERVAL):
+        # Set Sensing
+        self.write("SENS:FUNC \"{}\"".format(SENSE_TYPE))
+        if SENSE_RANGE == "AUTO" :
+            print("Sense Range: AUTO")
+            self.write("SENS:{}:RANG:AUTO ON".format(SENSE_TYPE))
+        else :
+            print("Sense Range: {}".format(SENSE_RANGE))
+            self.write("SENS:{}:RANG {}".format(SENSE_TYPE, SENSE_RANGE))
+
+        # Switch 4-Point vs 2-Point Measurement
+        if FOUR_OR_TWO == "4PT":
+            print( "4 Point Resistance Measurement:")
+            self.write(":SENS:{}:RSEN ON".format(SENSE_TYPE))
+        elif FOUR_OR_TWO == "2PT":
+            print( "2 Point Resistance Measurement:")
+            self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
+        else:
+            print( "Unsupported Mode")
+            return "N/A", "N/A"
+
+
+        if self.isnumber(NPLC):
+            self.write("SENS:{}:NPLC {}".format(SENSE_TYPE, NPLC))
+
+        NPLC = float(self.query("SENS:{}:NPLC?".format(SENSE_TYPE)))
+        sample_time = NUM_SAMPLES*NPLC/(60.0) * 1.01
+        if INTERVAL > sample_time:
+            sample_time = INTERVAL
+        print( "Sample Time: {}".format(sample_time))
+
+
+        self.write(":TRIG:LOAD \"SimpleLoop\", {}".format(NUM_SAMPLES))
+
+        data = []
+        # Set Source Sweep
+        print( "[{}]".format(header) )
+        time_init = time.time()
+        for source_value in SOURCE_VALUES:
+            self.write(":SOUR:{} {}".format(SOURCE_TYPE, source_value))
+            
+            (T, sour_ave, sour_std, sens_ave, sens_std) = self.measure_once( NUM_SAMPLES, sample_time )
+            dT = T-time_init
+            data.append( [dT, sour_ave, sour_std, sens_ave, sens_std] )
+            print("[{:.3f}, {:+E}, {:+E}, {:+E}, {:+E}]".format(dT, sour_ave, sour_std, sens_ave, sens_std))
+
+        return data, header
         
-        # Set Current Source
-        self.write("SOUR:FUNC CURR")
-        self.write("SOUR:CURR:RANG {}".format(self.calculate_source_range("CURR",[I_START,I_END])))
-        self.write("SOUR:CURR:ILIM {}".format(VOLTAGE_LIMIT))
-
-        # Set Voltage Sensing
-        self.write("SENS:FUNC \"VOLT\"")
-        self.write("SENS:VOLT:RANG:AUTO ON")
-
-        # Set Linear Source Sweep
-        self.write("SOUR:SWE:CURR:LIN {}, {}, {}, {}".format(I_START, I_END, NUM_POINTS, INTERVAL))
+    
+    def measure_once( self, NUM_SAMPLES, sample_time ):
+        self.write("OUTP ON")
         self.write("INIT")
         self.write("*WAI")
-        self.write("TRAC:DATA? 1, {}, \"defbuffer1\", SOUR, READ".format( NUM_POINTS) )
+        TIME = time.time()
+
+        buffer_data = (self.query( "TRAC:DATA? 1, {}, \"defbuffer1\", SOUR, READ".format(NUM_SAMPLES), delay=sample_time) ).split(',')
+
+        sources = np.asarray( buffer_data[0::2], dtype=np.float64 )  
+        senses =  np.asarray( buffer_data[1::2], dtype=np.float64 )  
+
+        self.write("OUTP OFF")
+
+        return TIME, np.mean(sources), np.std(sources), np.mean(senses), np.std(senses)
+
 
     def calculate_source_range(self, type, values):
         v_ranges = [20e-3, 200e-3, 2, 20, 200]
@@ -328,6 +348,8 @@ class keithley_2450( controller ):
         # find smallest range that is larger than input values
         return min(filter(lambda x: x > value, range))
 
+    def isnumber( self, val ):
+        return isinstance(val, (int, float))
 
 
 
@@ -337,4 +359,4 @@ class hlab_2110( keithley_2110 ):
 
 class hlab_2450( keithley_2450 ):
     def __init__(self, use_pyvisapy = True, verbose = False):
-        keithley_2110.__init__(self, "04451534", use_pyvisapy, verbose)
+        keithley_2450.__init__(self, "04451534", use_pyvisapy, verbose)
