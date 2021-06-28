@@ -1,3 +1,5 @@
 pyEnv
 data
 __pycache___
+.DS_Store
+.vscode
