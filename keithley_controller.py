@@ -2,6 +2,7 @@ import pyvisa as visa
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+from datetime import datetime, timedelta
 import os.path
 
 from pyvisa.typing import VISAHandler
@@ -160,25 +161,29 @@ class keithley_2110( controller ):
         return data
 
     def measure_once( self, delay=None ):
-        return float(self.query( "FETC?", delay=delay)) # Sending 'FETCh?' after 'INIT' is much faster than 'READ?'
+        return np.float(self.query( "FETC?", delay=delay)) # Sending 'FETCh?' after 'INIT' is much faster than 'READ?'
         #return float(self.query( "READ?" ))
 
 class keithley_2450( controller ):
     def __init__(self, serial_number, use_pyvisapy = True, verbose = False):
         address = "USB0::0x05E6::0x2450::{}::INSTR".format(serial_number)
         controller.__init__(self, address, use_pyvisapy, verbose)
-        self.serial_number = 8011648
+        self.serial_number = serial_number
 
 
     def measure_resistance( self, FOUR_OR_TWO="2PT", NUM_POINTS=1, INTERVAL=0.1, SOURCE_CURRENT="N/A", VOLTAGE_LIMIT="N/A", SENSE_RANGE="AUTO", NUM_SAMPLES=5, NPLC=1 ):
-
+        
+        # Switch to rear terminals
+        self.write(":ROUT:TERM REAR")
+        print(self.query(":ROUT:TERM?\n"))
+        
         # Switch to 4-Point Measurement
         if FOUR_OR_TWO == "4PT":
             print( "4 Point Resistance Measurement:")
             self.write(":SENS:VOLT:RSEN ON")
         elif FOUR_OR_TWO == "2PT":
             print( "2 Point Resistance Measurement:")
-            self.write(":SENS:VOLT:RSEN OFF")
+            #self.write(":SENS:VOLT:RSEN OFF")
         else:
             print( "Unsupported Mode")
             return "N/A", "N/A"
@@ -257,7 +262,10 @@ class keithley_2450( controller ):
         else :
             print( "SOURCE_TYPE must be \"VOLT\" or \"CURR\"")
             return "N/A", "N/A"
-
+        
+        # Switch to rear terminals
+        self.write(":ROUT:TERM REAR")
+        print(self.query(":ROUT:TERM?\n"))
 
         # Set Voltage Source
         self.write("SOUR:FUNC {}".format(SOURCE_TYPE))
@@ -283,7 +291,7 @@ class keithley_2450( controller ):
             self.write(":SENS:{}:RSEN ON".format(SENSE_TYPE))
         elif FOUR_OR_TWO == "2PT":
             print( "2 Point Resistance Measurement:")
-            self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
+            #self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
         else:
             print( "Unsupported Mode")
             return "N/A", "N/A"
@@ -331,6 +339,115 @@ class keithley_2450( controller ):
 
         return TIME, np.mean(sources), np.std(sources), np.mean(senses), np.std(senses)
 
+    
+    def measure_R_cont( self, SOURCE_TYPE, SOURCE_VALUE, FOUR_OR_TWO="4PT", SOURCE_LIMIT="0.001", SENSE_RANGE="AUTO", HEATMINUTE = 1, INTERVAL = 0.01, NPLC=0.1) :
+        
+        if SOURCE_TYPE == 'VOLT':
+            SENSE_TYPE = 'CURR'
+            LIMIT_TYPE = 'ILIM'
+            LIMIT_UNIT = 'A'
+            header = "Time (s),Voltage Mean (V),Voltage Std (V),Current Mean (A),Current Std (A)"
+        elif SOURCE_TYPE == 'CURR':
+            SENSE_TYPE = 'VOLT'
+            LIMIT_TYPE = 'VLIM'
+            LIMIT_UNIT = 'V'
+            header = "Time (s),Current Mean (A),Current Std (A),Voltage Mean (V),Voltage Std (V)"
+        else :
+            print( "SOURCE_TYPE must be \"VOLT\" or \"CURR\"")
+            return "N/A", "N/A"
+
+        # Switch to rear terminals
+        self.write(":ROUT:TERM REAR")
+        print(self.query(":ROUT:TERM?\n"))
+
+
+        # Set Source
+        self.write("SOUR:FUNC {}".format(SOURCE_TYPE))
+        self.write("SOUR:{}:RANG {}".format(SOURCE_TYPE, self.calculate_source_range( SOURCE_TYPE,SOURCE_VALUE)))
+        self.write("SOUR:{} {}".format(SOURCE_TYPE, SOURCE_VALUE))
+
+        if self.isnumber( SOURCE_LIMIT ):
+            print( "Source Limit: {}{}\n".format(SOURCE_LIMIT, LIMIT_UNIT))
+            self.write("SOUR:{}:{} {}".format(SOURCE_TYPE, LIMIT_TYPE, SOURCE_LIMIT))
+
+        # Set Sensing
+        self.write("SENS:FUNC \"{}\"".format(SENSE_TYPE))
+        if SENSE_RANGE == "AUTO" :
+            print("Sense Range: AUTO")
+            self.write("SENS:{}:RANG:AUTO ON".format(SENSE_TYPE))
+        else :
+            print("Sense Range: {}".format(SENSE_RANGE))
+            self.write("SENS:{}:RANG {}".format(SENSE_TYPE, SENSE_RANGE))
+
+        #self.write(":SENS:{}:RSEN ON".format(SENSE_TYPE))
+        #self.write(":SENS:{}:AVER:COUNT {}".format(SENSE_TYPE, NUM_SAMPLES))
+        #self.write(":SENS:{}:AVER:TCON REP; AVER ON".format(SENSE_TYPE, NUM_SAMPLES))
+        #self.write(":SENS:{}:AZER ON".format(SENSE_TYPE))
+
+        # Switch 4-Point vs 2-Point Measurement
+        if FOUR_OR_TWO == "4PT":
+            print( "4 Point Resistance Measurement:")
+            self.write(":SENS:{}:RSEN ON".format(SENSE_TYPE))
+        elif FOUR_OR_TWO == "2PT":
+            print( "2 Point Resistance Measurement:")
+            self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
+        else:
+            print( "Unsupported Mode")
+            return "N/A", "N/A"
+        if self.isnumber(NPLC):
+            self.write("SENS:{}:NPLC {}".format(SENSE_TYPE, NPLC))
+
+        NPLC = float(self.query("SENS:{}:NPLC?".format(SENSE_TYPE)))
+        sample_time = NPLC/(60.0) * 1.1
+        if INTERVAL > sample_time:
+            sample_time = INTERVAL
+        print( "Sample Time: {}".format(sample_time))
+
+        data = []
+        # Set starting time
+        print( "[{}]".format(header))
+
+        def time_elapsed(start):
+            delta_t = time.time() - start
+            return delta_t       
+
+        # Start continuous sourcing
+        heat_time = (timedelta(minutes=HEATMINUTE)).total_seconds()
+        time_init = time.time()
+        dt = time_elapsed(time_init)
+
+        while(dt < heat_time):
+            try:                
+                (T, sour_ave, sour_std, sens_ave, sens_std) = self.avg_R_once(sample_time )
+
+                dt = T-time_init 
+                data.append( [dt, sour_ave, sour_std, sens_ave, sens_std] )
+
+                print("[{:.3f}, {:+E}, {:+E}]".format(dt, sour_ave, sens_ave))
+
+            except KeyboardInterrupt:
+                print( "KeyboardInterrupt: Ending Early")
+                dt = heat_time
+
+        return data, header
+     
+
+    def avg_R_once(self, sample_time):
+        self.write("TRAC:CLE")
+        self.write("OUTP ON")
+        self.write("INIT")
+        self.write("*WAI")
+        TIME = time.time()
+
+        buffer_data = (self.query( "TRAC:DATA? 1,1, \"defbuffer1\", SOUR, READ", delay=100*sample_time) ).split(',')
+
+        sources = np.asarray( buffer_data[0::2], dtype=np.float64)
+        senses =  np.asarray( buffer_data[1::2], dtype=np.float64 )   
+
+        self.write("OUTP OFF")
+
+        return TIME, np.mean(sources), np.std(sources), np.mean(senses), np.mean(senses) 
+
 
     def calculate_source_range(self, type, values):
         v_ranges = [20e-3, 200e-3, 2, 20, 200]
@@ -350,7 +467,6 @@ class keithley_2450( controller ):
 
     def isnumber( self, val ):
         return isinstance(val, (int, float))
-
 
 
 class hlab_2110( keithley_2110 ):
