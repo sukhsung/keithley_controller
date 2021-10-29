@@ -183,7 +183,7 @@ class keithley_2450( controller ):
             self.write(":SENS:VOLT:RSEN ON")
         elif FOUR_OR_TWO == "2PT":
             print( "2 Point Resistance Measurement:")
-            #self.write(":SENS:VOLT:RSEN OFF")
+            self.write(":SENS:VOLT:RSEN OFF")
         else:
             print( "Unsupported Mode")
             return "N/A", "N/A"
@@ -291,7 +291,7 @@ class keithley_2450( controller ):
             self.write(":SENS:{}:RSEN ON".format(SENSE_TYPE))
         elif FOUR_OR_TWO == "2PT":
             print( "2 Point Resistance Measurement:")
-            #self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
+            self.write(":SENS:{}:RSEN OFF".format(SENSE_TYPE))
         else:
             print( "Unsupported Mode")
             return "N/A", "N/A"
